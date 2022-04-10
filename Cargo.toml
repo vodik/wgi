@@ -1,0 +1,20 @@
+[package]
+name = "wgi"
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+debug = true
+
+[dependencies]
+anyhow = "1.0.56"
+axum = { version = "0.5.1", features = ["headers", "multipart"] }
+hyper = "0.14.18"
+mime = "0.3.16"
+tokio = { version = "1.17.0", features = ["full"] }
+wasmer = "2.2.1"
+wasmer-cache = "2.2.1"
+wasmer-compiler-cranelift = "2.2.1"
+wasmer-engine-universal = "2.2.1"
+wasmer-wasi = "2.2.1"
+wat = "1.0.42"
