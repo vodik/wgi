@@ -42,162 +42,9 @@
 
 #include "cutils.h"
 #include "list.h"
-#include "quickjs-libc.h"
+#include "quickjs-wasi.h"
 
 #include <string.h>
-
-// Borrowed from musl
-static size_t slash_len(const char *s)
-{
-	const char *s0 = s;
-	while (*s == '/') s++;
-	return s-s0;
-}
-
-// Borrowed from musl
-static char *realpath(const char *restrict filename, char *restrict resolved)
-{
-	char stack[PATH_MAX+1];
-	char output[PATH_MAX];
-	size_t p, q, l, l0, cnt=0, nup=0;
-	int check_dir=0;
-
-	if (!filename) {
-		errno = EINVAL;
-		return 0;
-	}
-	l = strnlen(filename, sizeof stack);
-	if (!l) {
-		errno = ENOENT;
-		return 0;
-	}
-	if (l >= PATH_MAX) goto toolong;
-	p = sizeof stack - l - 1;
-	q = 0;
-	memcpy(stack+p, filename, l+1);
-
-	/* Main loop. Each iteration pops the next part from stack of
-	 * remaining path components and consumes any slashes that follow.
-	 * If not a link, it's moved to output; if a link, contents are
-	 * pushed to the stack. */
-restart:
-	for (; ; p+=slash_len(stack+p)) {
-		/* If stack starts with /, the whole component is / or //
-		 * and the output state must be reset. */
-		if (stack[p] == '/') {
-			check_dir=0;
-			nup=0;
-			q=0;
-			output[q++] = '/';
-			p++;
-			/* Initial // is special. */
-			if (stack[p] == '/' && stack[p+1] != '/')
-				output[q++] = '/';
-			continue;
-		}
-
-		char *z = __strchrnul(stack+p, '/');
-		l0 = l = z-(stack+p);
-
-		if (!l && !check_dir) break;
-
-		/* Skip any . component but preserve check_dir status. */
-		if (l==1 && stack[p]=='.') {
-			p += l;
-			continue;
-		}
-
-		/* Copy next component onto output at least temporarily, to
-		 * call readlink, but wait to advance output position until
-		 * determining it's not a link. */
-		if (q && output[q-1] != '/') {
-			if (!p) goto toolong;
-			stack[--p] = '/';
-			l++;
-		}
-		if (q+l >= PATH_MAX) goto toolong;
-		memcpy(output+q, stack+p, l);
-		output[q+l] = 0;
-		p += l;
-
-		int up = 0;
-		if (l0==2 && stack[p-2]=='.' && stack[p-1]=='.') {
-			up = 1;
-			/* Any non-.. path components we could cancel start
-			 * after nup repetitions of the 3-byte string "../";
-			 * if there are none, accumulate .. components to
-			 * later apply to cwd, if needed. */
-			if (q <= 3*nup) {
-				nup++;
-				q += l;
-				continue;
-			}
-			/* When previous components are already known to be
-			 * directories, processing .. can skip readlink. */
-			if (!check_dir) goto skip_readlink;
-		}
-		ssize_t k = readlink(output, stack, p);
-		if (k==p) goto toolong;
-		if (!k) {
-			errno = ENOENT;
-			return 0;
-		}
-		if (k<0) {
-			if (errno != EINVAL) return 0;
-skip_readlink:
-			check_dir = 0;
-			if (up) {
-				while(q && output[q-1]!='/') q--;
-				if (q>1 && (q>2 || output[0]!='/')) q--;
-				continue;
-			}
-			if (l0) q += l;
-			check_dir = stack[p];
-			continue;
-		}
-		if (++cnt == SYMLOOP_MAX) {
-			errno = ELOOP;
-			return 0;
-		}
-
-		/* If link contents end in /, strip any slashes already on
-		 * stack to avoid /->// or //->/// or spurious toolong. */
-		if (stack[k-1]=='/') while (stack[p]=='/') p++;
-		p -= k;
-		memmove(stack+p, stack, k);
-
-		/* Skip the stack advancement in case we have a new
-		 * absolute base path. */
-		goto restart;
-	}
-
- 	output[q] = 0;
-
-	if (output[0] != '/') {
-		if (!getcwd(stack, sizeof stack)) return 0;
-		l = strlen(stack);
-		/* Cancel any initial .. components. */
-		p = 0;
-		while (nup--) {
-			while(l>1 && stack[l-1]!='/') l--;
-			if (l>1) l--;
-			p += 2;
-			if (p<q) p++;
-		}
-		if (q-p && stack[l-1]!='/') stack[l++] = '/';
-		if (l + (q-p) + 1 >= PATH_MAX) goto toolong;
-		memmove(output + l, output + p, q - p + 1);
-		memcpy(output, stack, l);
-		q = l + q-p;
-	}
-
-	if (resolved) return memcpy(resolved, output, q+1);
-	else return strdup(output);
-
-toolong:
-	errno = ENAMETOOLONG;
-	return 0;
-}
 
 typedef struct {
     struct list_head link;
@@ -562,8 +409,7 @@ static JSValue js_std_loadFile(JSContext *ctx, JSValueConst this_val,
 typedef JSModuleDef *(JSInitModuleFunc)(JSContext *ctx,
                                         const char *module_name);
 
-int js_module_set_import_meta(JSContext *ctx, JSValueConst func_val,
-                              JS_BOOL use_realpath, JS_BOOL is_main)
+int js_module_set_import_meta(JSContext *ctx, JSValueConst func_val, JS_BOOL is_main)
 {
     JSModuleDef *m;
     char buf[PATH_MAX + 16];
@@ -581,19 +427,7 @@ int js_module_set_import_meta(JSContext *ctx, JSValueConst func_val,
         return -1;
     if (!strchr(module_name, ':')) {
         strcpy(buf, "file://");
-        /* realpath() cannot be used with modules compiled with qjsc
-           because the corresponding module source code is not
-           necessarily present */
-        if (use_realpath) {
-            char *res = realpath(module_name, buf + strlen(buf));
-            if (!res) {
-                JS_ThrowTypeError(ctx, "realpath failure");
-                JS_FreeCString(ctx, module_name);
-                return -1;
-            }
-        } else {
-            pstrcat(buf, sizeof(buf), module_name);
-        }
+        pstrcat(buf, sizeof(buf), module_name);
     } else {
         pstrcpy(buf, sizeof(buf), module_name);
     }
@@ -638,7 +472,7 @@ JSModuleDef *js_module_loader(JSContext *ctx,
         if (JS_IsException(func_val))
             return NULL;
         /* XXX: could propagate the exception */
-        js_module_set_import_meta(ctx, func_val, TRUE, FALSE);
+        js_module_set_import_meta(ctx, func_val, FALSE);
         /* the module is already referenced, so we must free it */
         m = JS_VALUE_GET_PTR(func_val);
         JS_FreeValue(ctx, func_val);
@@ -1948,28 +1782,6 @@ static JSValue js_os_sleep(JSContext *ctx, JSValueConst this_val,
     return JS_NewInt32(ctx, ret);
 }
 
-/* return [path, errorcode] */
-static JSValue js_os_realpath(JSContext *ctx, JSValueConst this_val,
-                              int argc, JSValueConst *argv)
-{
-    const char *path;
-    char buf[PATH_MAX], *res;
-    int err;
-
-    path = JS_ToCString(ctx, argv[0]);
-    if (!path)
-        return JS_EXCEPTION;
-    res = realpath(path, buf);
-    JS_FreeCString(ctx, path);
-    if (!res) {
-        buf[0] = '\0';
-        err = errno;
-    } else {
-        err = 0;
-    }
-    return make_string_error(ctx, buf, err);
-}
-
 static JSValue js_os_symlink(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
@@ -2118,7 +1930,6 @@ static const JSCFunctionListEntry js_os_funcs[] = {
     OS_FLAG(S_ISUID),
     JS_CFUNC_MAGIC_DEF("stat", 1, js_os_stat, 0 ),
     JS_CFUNC_DEF("sleep", 1, js_os_sleep ),
-    JS_CFUNC_DEF("realpath", 1, js_os_realpath ),
     JS_CFUNC_MAGIC_DEF("lstat", 1, js_os_stat, 1 ),
     JS_CFUNC_DEF("symlink", 2, js_os_symlink ),
     JS_CFUNC_DEF("readlink", 1, js_os_readlink ),
@@ -2322,7 +2133,7 @@ void js_std_eval_binary(JSContext *ctx, const uint8_t *buf, size_t buf_len,
         goto exception;
     if (load_only) {
         if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
-            js_module_set_import_meta(ctx, obj, FALSE, FALSE);
+            js_module_set_import_meta(ctx, obj, FALSE);
         }
     } else {
         if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
@@ -2330,7 +2141,7 @@ void js_std_eval_binary(JSContext *ctx, const uint8_t *buf, size_t buf_len,
                 JS_FreeValue(ctx, obj);
                 goto exception;
             }
-            js_module_set_import_meta(ctx, obj, FALSE, TRUE);
+            js_module_set_import_meta(ctx, obj, TRUE);
         }
         val = JS_EvalFunction(ctx, obj);
         if (JS_IsException(val)) {
