@@ -1,5 +1,7 @@
 /*
- * QuickJS C library
+ * QuickJS C library for WASI
+ *
+ * A modified version of QuickJS libc that targets wasi-libc.
  *
  * Copyright (c) 2017-2021 Fabrice Bellard
  * Copyright (c) 2017-2021 Charlie Gordon
@@ -44,6 +46,7 @@
 
 #include <string.h>
 
+// Borrowed from musl
 static size_t slash_len(const char *s)
 {
 	const char *s0 = s;
@@ -51,6 +54,7 @@ static size_t slash_len(const char *s)
 	return s-s0;
 }
 
+// Borrowed from musl
 static char *realpath(const char *restrict filename, char *restrict resolved)
 {
 	char stack[PATH_MAX+1];
@@ -194,8 +198,6 @@ toolong:
 	errno = ENAMETOOLONG;
 	return 0;
 }
-
-
 
 typedef struct {
     struct list_head link;
