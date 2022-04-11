@@ -34,6 +34,7 @@ impl<'a> App<'a> {
         let mut builder = WasiState::new("wgi-bin");
         builder.stdin(Box::new(input));
         builder.stdout(Box::new(output));
+        builder.preopen_dir(".")?;
         for (key, value) in &self.vars {
             builder.env(key, value);
         }
