@@ -1,4 +1,3 @@
-import { getenv } from "std";
+import { userAgent } from "./cgi.js";
 
-const userAgent = getenv("HTTP_USER_AGENT");
-console.log(`Hello ${userAgent} - from QuickJS`);
+console.log(`Hello ${userAgent()}`);
