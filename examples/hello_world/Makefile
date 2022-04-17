@@ -13,7 +13,7 @@ WASI_SYSROOT = /usr/share/wasi-sysroot
 all: hello_world.wasm
 
 all.bc: hello_world.bc
-	$(LD) $? -o $@
+	$(LD) $^ -o $@
 
 opt.bc: all.bc
 	$(OPT) -std-link-opts -O3 $? -o $@
