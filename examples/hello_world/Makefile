@@ -2,8 +2,13 @@ CC = clang
 LD = llvm-link
 OPT = opt
 
-CFLAGS := -std=c99 -O3 \
+CFLAGS := -std=c99 -Os -flto \
+	-D_GNU_SOURCE \
 	$(CFLAGS)
+
+OPTFLAGS := -std-link-opts -Os
+
+LDFLAGS := -flto
 
 WASI_SYSROOT = /usr/share/wasi-sysroot
 
@@ -16,10 +21,10 @@ all.bc: hello_world.bc
 	$(LD) $^ -o $@
 
 opt.bc: all.bc
-	$(OPT) -std-link-opts -O3 $? -o $@
+	$(OPT) $(OPTFLAGS) $? -o $@
 
 hello_world.wasm: opt.bc
-	$(CC) -flto --target=wasm32-unknown-wasi --sysroot=$(WASI_SYSROOT) $? -o $@
+	$(CC) $(LDFLAGS) --target=wasm32-unknown-wasi --sysroot=$(WASI_SYSROOT) $? -o $@
 
 clean:
-	$(RM) hello_world.wasm hello_world.ll *.bc
+	$(RM) hello_world.wasm *.bc

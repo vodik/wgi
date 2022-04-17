@@ -2,13 +2,17 @@ CC = clang
 LD = llvm-link
 OPT = opt
 
-CFLAGS := -std=c99 -O3 \
+CFLAGS := -std=c99 -Os -flto \
 	-D_GNU_SOURCE \
 	-DEMSCRIPTEN \
 	-DCONFIG_VERSION=\"$(shell cat quickjs/VERSION)\" \
 	-DCONFIG_BIGNUM \
 	-I./quickjs \
 	$(CFLAGS)
+
+OPTFLAGS := -std-link-opts -Os
+
+LDFLAGS := -flto
 
 WASI_SYSROOT = /usr/share/wasi-sysroot
 
@@ -21,10 +25,10 @@ all.bc: main.bc quickjs/cutils.bc quickjs/libbf.bc quickjs/libregexp.bc quickjs/
 	$(LD) $^ -o $@
 
 opt.bc: all.bc
-	$(OPT) -std-link-opts -O3 $? -o $@
+	$(OPT) $(OPTFLAGS) $? -o $@
 
 js.wasm: opt.bc
-	$(CC) -flto --target=wasm32-unknown-wasi --sysroot=$(WASI_SYSROOT) $? -o $@
+	$(CC) $(LDFLAGS) --target=wasm32-unknown-wasi --sysroot=$(WASI_SYSROOT) $? -o $@
 
 clean:
 	$(RM) js.wasm js.ll *.bc quickjs/*.bc
