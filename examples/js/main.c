@@ -1,6 +1,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "quickjs-wasi.h"
 #include "quickjs.h"
@@ -66,7 +68,22 @@ static int eval_file(JSContext *ctx, const char *filename) {
     return ret;
 }
 
+static char *path_parent(const char *script_path) {
+    const char *sep = strrchr(script_path, '/');
+    if (sep && sep != script_path) {
+        return strndup(script_path, sep - script_path);
+    }
+    return NULL;
+}
+
 int main(int argc, char *argv[]) {
+    const char *script_path = getenv("SCRIPT_NAME");
+    if (script_path) {
+        char *parent = path_parent(script_path);
+        chdir(parent);
+        free(parent);
+    }
+
     JSRuntime *rt = JS_NewRuntime();
     js_std_init_handlers(rt);
     JS_SetModuleLoaderFunc(rt, NULL, js_module_loader, NULL);
