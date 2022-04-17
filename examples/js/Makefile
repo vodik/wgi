@@ -1,5 +1,6 @@
 CC = clang
 LD = llvm-link
+OPT = opt
 
 CFLAGS := -std=c99 -O3 \
 	-D_GNU_SOURCE \
@@ -20,7 +21,7 @@ all.bc: main.bc quickjs/cutils.bc quickjs/libbf.bc quickjs/libregexp.bc quickjs/
 	$(LD) $? -o $@
 
 js.bc: all.bc
-	opt -std-link-opts -O3 all.bc -o js.bc
+	$(OPT) -std-link-opts -O3 $? -o $@
 
 js.wasm: js.bc
 	$(CC) -flto --target=wasm32-unknown-wasi --sysroot=$(WASI_SYSROOT) $? -o $@
