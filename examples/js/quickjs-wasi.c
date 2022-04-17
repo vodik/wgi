@@ -535,6 +535,45 @@ static JSValue js_std_unsetenv(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+/* return an object containing the list of the available environment
+   variables. */
+static JSValue js_std_getenviron(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv)
+{
+    char **envp;
+    const char *name, *p, *value;
+    JSValue obj;
+    uint32_t idx;
+    size_t name_len;
+    JSAtom atom;
+    int ret;
+
+    obj = JS_NewObject(ctx);
+    if (JS_IsException(obj))
+        return JS_EXCEPTION;
+    envp = environ;
+    for(idx = 0; envp[idx] != NULL; idx++) {
+        name = envp[idx];
+        p = strchr(name, '=');
+        name_len = p - name;
+        if (!p)
+            continue;
+        value = p + 1;
+        atom = JS_NewAtomLen(ctx, name, name_len);
+        if (atom == JS_ATOM_NULL)
+            goto fail;
+        ret = JS_DefinePropertyValue(ctx, obj, atom, JS_NewString(ctx, value),
+                                     JS_PROP_C_W_E);
+        JS_FreeAtom(ctx, atom);
+        if (ret < 0)
+            goto fail;
+    }
+    return obj;
+ fail:
+    JS_FreeValue(ctx, obj);
+    return JS_EXCEPTION;
+}
+
 static JSValue js_std_gc(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
 {
@@ -1048,6 +1087,7 @@ static const JSCFunctionListEntry js_std_funcs[] = {
     JS_CFUNC_DEF("getenv", 1, js_std_getenv ),
     JS_CFUNC_DEF("setenv", 1, js_std_setenv ),
     JS_CFUNC_DEF("unsetenv", 1, js_std_unsetenv ),
+    JS_CFUNC_DEF("getenviron", 1, js_std_getenviron ),
     JS_CFUNC_DEF("loadFile", 1, js_std_loadFile ),
     JS_CFUNC_DEF("strerror", 1, js_std_strerror ),
     JS_CFUNC_DEF("parseExtJSON", 1, js_std_parseExtJSON ),
