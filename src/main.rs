@@ -10,12 +10,14 @@ use axum::{
     Router,
 };
 use hyper::HeaderMap;
-use std::{env, fs, io, net::SocketAddr, path::PathBuf, str::FromStr};
+use std::{env, fs::File, io::Read, net::SocketAddr, path::PathBuf, str::FromStr};
 use wasmer::{DeserializeError, Instance, Module, Store, Triple, VERSION};
 use wasmer_cache::{Cache, FileSystemCache, Hash};
 use wasmer_compiler_cranelift::Cranelift;
 use wasmer_engine_universal::Universal;
 use wasmer_wasi::{Pipe, WasiState};
+
+const SERVER_SOFTWARE: &str = "wgi";
 
 struct App<'a> {
     wasm: Vec<u8>,
@@ -47,7 +49,7 @@ impl<'a> App<'a> {
         {
             let mut state = wasi_env.state();
             let wasi_stdin = state.fs.stdin_mut()?.as_mut().unwrap();
-            wasi_stdin.write_all(&self.input)?;
+            wasi_stdin.write_all(self.input)?;
         }
 
         let run = instance.exports.get_native_function::<(), ()>("_start")?;
@@ -62,25 +64,16 @@ impl<'a> App<'a> {
     }
 }
 
-fn find_wasm(mut path: &str) -> Result<(Vec<u8>, String), io::Error> {
+fn iter_path_splits(mut path: &str) -> impl Iterator<Item = (&str, &str)> {
     if path.as_bytes().get(0) == Some(&b'/') {
         path = &path[1..];
     }
 
-    let parts = path
-        .bytes()
+    path.bytes()
         .enumerate()
         .filter(|(_, b)| *b == b'/')
-        .map(|(i, _)| (&path[..i], &path[i + 1..]));
-
-    for (path, rest) in parts {
-        match fs::read(&path) {
-            Ok(bytes) => return Ok((bytes, "/".to_string() + rest)),
-            Err(_) => continue,
-        };
-    }
-
-    fs::read(&path).map(|bytes| (bytes, "".into()))
+        .map(|(i, _)| (&path[..i], &path[i..]))
+        .chain(std::iter::once((path, "")))
 }
 
 fn server_protocol(version: Version) -> Option<&'static str> {
@@ -100,32 +93,56 @@ fn to_cgi_http_header(header: &str) -> String {
 
 async fn root(mut request: Request<Body>) -> impl IntoResponse {
     let path = request.uri().path();
-    let (wasm, rest) = find_wasm(path).unwrap();
+
+    let mut wasm = Vec::new();
+    let mut script_name = None;
+    let mut path_info = None;
+
+    for (path, rest) in iter_path_splits(path) {
+        match File::open(path).and_then(|mut file| file.read_to_end(&mut wasm)) {
+            Ok(_) => {
+                script_name = Some(path);
+                path_info = Some(rest);
+                break;
+            }
+            Err(_) => continue,
+        }
+    }
 
     let query = request.uri().query();
     let method = format!("{}", request.method());
 
-    let translated = env::current_dir().unwrap().join(&rest);
-
     let mut vars = vec![
         ("GATEWAY_INTERFACE".into(), "CGI/1.1".into()),
-        ("SERVER_SOFTWARE".into(), "wgi".into()),
+        ("SERVER_SOFTWARE".into(), SERVER_SOFTWARE.into()),
         ("SERVER_NAME".into(), "127.0.0.1".into()),
         ("SERVER_PORT".into(), "9000".into()),
         (
             "SERVER_PROTOCOL".into(),
-            server_protocol(request.version()).unwrap().into(),
+            server_protocol(request.version())
+                .expect("Unknown HTTP version")
+                .into(),
         ),
         ("REQUEST_METHOD".into(), method),
         ("QUERY_STRING".into(), query.unwrap_or("").into()),
-        ("SCRIPT_NAME".into(), path.into()),
-        ("PATH_INFO".into(), rest),
-        (
-            "PATH_TRANSLATED".into(),
-            translated.into_os_string().into_string().unwrap(),
-        ),
         // ("REMOTE_HOST".into(), "todo".into()),
     ];
+
+    if let Some(var) = path_info {
+        let translated = env::current_dir()
+            .unwrap()
+            .into_os_string()
+            .into_string()
+            .unwrap()
+            + var;
+
+        vars.push(("PATH_INFO".into(), var.to_string()));
+        vars.push(("PATH_TRANSLATED".into(), translated));
+    }
+
+    if let Some(var) = script_name {
+        vars.push(("SCRIPT_NAME".into(), "/".to_string() + var));
+    }
 
     vars.extend(request.headers().iter().map(|(header, value)| {
         let value = value.to_str().unwrap();
