@@ -20,10 +20,10 @@ all: js.wasm
 all.bc: main.bc quickjs/cutils.bc quickjs/libbf.bc quickjs/libregexp.bc quickjs/libunicode.bc quickjs/quickjs.bc quickjs-wasi.bc
 	$(LD) $? -o $@
 
-js.bc: all.bc
+opt.bc: all.bc
 	$(OPT) -std-link-opts -O3 $? -o $@
 
-js.wasm: js.bc
+js.wasm: opt.bc
 	$(CC) -flto --target=wasm32-unknown-wasi --sysroot=$(WASI_SYSROOT) $? -o $@
 
 clean:
