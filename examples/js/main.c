@@ -66,40 +66,26 @@ static int eval_file(JSContext *ctx, const char *filename) {
     return ret;
 }
 
-int main() {
-    JSRuntime *rt;
-    JSContext *ctx;
-
-    rt = JS_NewRuntime();
+int main(int argc, char *argv[]) {
+    JSRuntime *rt = JS_NewRuntime();
     js_std_init_handlers(rt);
-    ctx = JS_NewContextRaw(rt);
-
-    JS_AddIntrinsicBaseObjects(ctx);
-    JS_AddIntrinsicEval(ctx);
-
-    js_init_module_std(ctx, "std");
-    js_init_module_os(ctx, "os");
     JS_SetModuleLoaderFunc(rt, NULL, js_module_loader, NULL);
 
-    JSValue global_obj, console;
+    JSContext *ctx = JS_NewContext(rt);
+    js_std_add_helpers(ctx, argc, argv);
+    js_init_module_std(ctx, "std");
+    js_init_module_os(ctx, "os");
 
-    global_obj = JS_GetGlobalObject(ctx);
-
-    console = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, console, "log",
-                      JS_NewCFunction(ctx, js_print, "log", 1));
-    JS_SetPropertyStr(ctx, global_obj, "console", console);
-
-    JS_FreeValue(ctx, global_obj);
-
+    int ret = 0;
     const char *path = getenv("PATH_INFO");
-    if (path) {
-        eval_file(ctx, path + 1);
+    if (path && *path != '\0') {
+        ret = eval_file(ctx, path + 1);
     } else {
-        return 1;
+        ret = 1;
     }
 
-    /* js_std_free_handlers(rt);
+    js_std_free_handlers(rt);
     JS_FreeContext(ctx);
-    JS_FreeRuntime(rt);*/
+    JS_FreeRuntime(rt);
+    return ret;
 }
