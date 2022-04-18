@@ -92,7 +92,6 @@ typedef struct JSThreadState {
     struct list_head os_signal_handlers; /* list JSOSSignalHandler.link */
     struct list_head os_timers; /* list of JSOSTimer.link */
     struct list_head port_list; /* list of JSWorkerMessageHandler.link */
-    int eval_script_recurse; /* only used in the main thread */
     /* not used in the main thread */
     JSWorkerMessagePipe *recv_pipe, *send_pipe;
 } JSThreadState;
@@ -596,6 +595,40 @@ static int get_bool_option(JSContext *ctx, BOOL *pbool,
     return 0;
 }
 
+static JSValue js_evalScript(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    JSThreadState *ts = JS_GetRuntimeOpaque(rt);
+    const char *str;
+    size_t len;
+    JSValue ret;
+    JSValueConst options_obj;
+    BOOL backtrace_barrier = FALSE;
+    int flags;
+
+    if (argc >= 2) {
+        options_obj = argv[1];
+        if (get_bool_option(ctx, &backtrace_barrier, options_obj,
+                            "backtrace_barrier"))
+            return JS_EXCEPTION;
+    }
+
+    str = JS_ToCStringLen(ctx, &len, argv[0]);
+    if (!str)
+        return JS_EXCEPTION;
+    flags = JS_EVAL_TYPE_GLOBAL;
+    if (backtrace_barrier)
+        flags |= JS_EVAL_FLAG_BACKTRACE_BARRIER;
+    ret = JS_Eval(ctx, str, len, "<evalScript>", flags);
+    JS_FreeCString(ctx, str);
+    if (!ts->recv_pipe) {
+        if (JS_IsException(ret))
+            JS_ResetUncatchableError(ctx);
+    }
+    return ret;
+}
+
 static JSClassID js_std_file_class_id;
 
 typedef struct {
@@ -1083,6 +1116,7 @@ static const JSCFunctionListEntry js_std_error_props[] = {
 static const JSCFunctionListEntry js_std_funcs[] = {
     JS_CFUNC_DEF("exit", 1, js_std_exit ),
     JS_CFUNC_DEF("gc", 0, js_std_gc ),
+    JS_CFUNC_DEF("evalScript", 1, js_evalScript ),
     JS_CFUNC_DEF("loadScript", 1, js_loadScript ),
     JS_CFUNC_DEF("getenv", 1, js_std_getenv ),
     JS_CFUNC_DEF("setenv", 1, js_std_setenv ),
