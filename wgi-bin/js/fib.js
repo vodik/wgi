@@ -1,3 +1,5 @@
-import { fibonacci } from "./utils.js";
+import { getQuery } from "./cgi.js";
+import { fibonacci } from "./math.js";
 
-console.log("50th fibonacci number is", fibonacci(50));
+const query = getQuery();
+console.log(fibonacci(query.t || 50));
