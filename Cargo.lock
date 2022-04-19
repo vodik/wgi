@@ -2056,7 +2056,6 @@ dependencies = [
  "wasmer-compiler-cranelift",
  "wasmer-engine-universal",
  "wasmer-wasi",
- "wat",
 ]
 
 [[package]]
