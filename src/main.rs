@@ -108,18 +108,15 @@ async fn root(mut request: Request<Body>) -> impl IntoResponse {
         }
     }));
 
-    let body = if let Some(res) = request.body_mut().data().await {
-        res.unwrap()
-    } else {
-        Bytes::new()
-    };
+    let body = request
+        .body_mut()
+        .data()
+        .await
+        .transpose()
+        .unwrap()
+        .unwrap_or_else(Bytes::new);
 
-    let app = wasm::App {
-        wasm,
-        input: &body,
-        vars,
-    };
-    let output = app.run().unwrap();
+    let output = wasm::App::new(wasm).run(&body, &vars).unwrap();
 
     let mut status = StatusCode::OK;
     let mut headers = HeaderMap::new();

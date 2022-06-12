@@ -5,16 +5,38 @@ use wasmer_compiler_cranelift::Cranelift;
 use wasmer_engine_universal::Universal;
 use wasmer_wasi::{Pipe, WasiState};
 
-pub struct App<'a> {
-    pub wasm: Vec<u8>,
-    pub input: &'a [u8],
-    pub vars: Vec<(String, String)>,
-}
+pub struct App(Vec<u8>);
 
-impl<'a> App<'a> {
-    pub fn run(&self) -> anyhow::Result<String> {
+impl App {
+    pub fn new(wasm: Vec<u8>) -> Self {
+        Self(wasm)
+    }
+
+    fn module(&self) -> anyhow::Result<Module> {
+        let hash = Hash::generate(&self.0);
+
         let store = Store::new(&Universal::new(Cranelift::default()).engine());
-        let module = get_module_from_cache(&store, &self.wasm)?;
+        let mut cache = get_cache()?;
+
+        match unsafe { cache.load(&store, hash) } {
+            Ok(module) => Ok(module),
+            Err(e) => {
+                match e {
+                    DeserializeError::Io(_) => {}
+                    err => {
+                        eprintln!("cached module is corrupted: {}", err);
+                    }
+                }
+
+                let module = Module::new(&store, &&self.0)?;
+                cache.store(hash, &module)?;
+                Ok(module)
+            }
+        }
+    }
+
+    pub fn run(&self, input2: &[u8], vars: &[(String, String)]) -> anyhow::Result<String> {
+        let module = self.module()?;
 
         let input = Pipe::new();
         let output = Pipe::new();
@@ -23,21 +45,20 @@ impl<'a> App<'a> {
         builder.stdin(Box::new(input));
         builder.stdout(Box::new(output));
         builder.preopen_dir(".")?;
-        for (key, value) in &self.vars {
+        for (key, value) in vars {
             builder.env(key, value);
         }
 
         let mut wasi_env = builder.finalize()?;
 
-        let import_object = wasi_env.import_object(&module)?;
-        let instance = Instance::new(&module, &import_object)?;
-
         {
             let mut state = wasi_env.state();
             let wasi_stdin = state.fs.stdin_mut()?.as_mut().unwrap();
-            wasi_stdin.write_all(self.input)?;
+            wasi_stdin.write_all(input2)?;
         }
 
+        let import_object = wasi_env.import_object(&module)?;
+        let instance = Instance::new(&module, &import_object)?;
         let run = instance.exports.get_native_function::<(), ()>("_start")?;
         run.call()?;
 
@@ -45,29 +66,7 @@ impl<'a> App<'a> {
         let wasi_stdout = state.fs.stdout_mut()?.as_mut().unwrap();
         let mut buf = String::new();
         wasi_stdout.read_to_string(&mut buf)?;
-
         Ok(buf)
-    }
-}
-
-fn get_module_from_cache(store: &Store, contents: &[u8]) -> anyhow::Result<Module> {
-    let mut cache = get_cache()?;
-
-    let hash = Hash::generate(contents);
-    match unsafe { cache.load(store, hash) } {
-        Ok(module) => Ok(module),
-        Err(e) => {
-            match e {
-                DeserializeError::Io(_) => {}
-                err => {
-                    eprintln!("cached module is corrupted: {}", err);
-                }
-            }
-            let module = Module::new(store, &contents)?;
-
-            cache.store(hash, &module)?;
-            Ok(module)
-        }
     }
 }
 
@@ -82,7 +81,7 @@ fn get_cache() -> anyhow::Result<FileSystemCache> {
     Ok(cache)
 }
 
-pub fn get_cache_dir() -> PathBuf {
+fn get_cache_dir() -> PathBuf {
     let path = env::var("WCGI_CACHE_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| env::temp_dir().join("wcgi"));
