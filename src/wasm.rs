@@ -35,15 +35,15 @@ impl App {
         }
     }
 
-    pub fn run(&self, input2: &[u8], vars: &[(String, String)]) -> anyhow::Result<String> {
+    pub fn run(&self, input: &[u8], vars: &[(String, String)]) -> anyhow::Result<String> {
         let module = self.module()?;
 
-        let input = Pipe::new();
-        let output = Pipe::new();
+        let stdin = Pipe::new();
+        let stdout = Pipe::new();
 
         let mut builder = WasiState::new("wgi-bin");
-        builder.stdin(Box::new(input));
-        builder.stdout(Box::new(output));
+        builder.stdin(Box::new(stdin));
+        builder.stdout(Box::new(stdout));
         builder.preopen_dir(".")?;
         for (key, value) in vars {
             builder.env(key, value);
@@ -54,7 +54,7 @@ impl App {
         {
             let mut state = wasi_env.state();
             let wasi_stdin = state.fs.stdin_mut()?.as_mut().unwrap();
-            wasi_stdin.write_all(input2)?;
+            wasi_stdin.write_all(input)?;
         }
 
         let import_object = wasi_env.import_object(&module)?;
