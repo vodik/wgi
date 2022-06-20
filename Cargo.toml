@@ -7,7 +7,7 @@ edition = "2021"
 debug = true
 
 [dependencies]
-anyhow = "1.0.56"
+anyhow = "1.0.58"
 axum = { version = "0.5.1", features = ["headers", "multipart"] }
 hyper = "0.14.18"
 mime = "0.3.16"
