@@ -9,9 +9,63 @@ use axum::{
     response::IntoResponse,
 };
 use hyper::HeaderMap;
-use std::{env, fs::File, io::Read, str::FromStr};
+use std::{convert::Infallible, env, fs::File, io::Read, str::FromStr};
 
 const SERVER_SOFTWARE: &str = "wgi";
+
+#[derive(Debug)]
+pub struct CgiResponse {
+    status: StatusCode,
+    headers: HeaderMap,
+    body: String,
+}
+
+impl CgiResponse {
+    pub fn new(status: StatusCode, headers: HeaderMap, body: String) -> Self {
+        Self {
+            status,
+            headers,
+            body,
+        }
+    }
+}
+
+impl FromStr for CgiResponse {
+    type Err = Infallible;
+
+    fn from_str(payload: &str) -> Result<Self, Self::Err> {
+        let mut status = StatusCode::OK;
+        let mut headers = HeaderMap::new();
+
+        let body = if let Some((header, body)) = payload.split_once("\n\n") {
+            for line in header.lines() {
+                if let Some((key, value)) = line.split_once(':') {
+                    let value = value.trim_start();
+                    if key.to_lowercase() == "status" {
+                        status = value.parse().unwrap();
+                    } else {
+                        headers.insert(
+                            HeaderName::from_str(key).unwrap(),
+                            HeaderValue::from_str(value).unwrap(),
+                        );
+                    }
+                }
+            }
+
+            body.to_string()
+        } else {
+            payload.to_string()
+        };
+
+        Ok(Self::new(status, headers, body))
+    }
+}
+
+impl IntoResponse for CgiResponse {
+    fn into_response(self) -> axum::response::Response {
+        (self.status, self.headers, self.body).into_response()
+    }
+}
 
 fn iter_path_splits(mut path: &str) -> impl Iterator<Item = (&str, &str)> {
     if path.as_bytes().get(0) == Some(&b'/') {
@@ -102,7 +156,7 @@ pub async fn handler(mut request: Request<Body>) -> impl IntoResponse {
         match header {
             &CONTENT_TYPE => ("CONTENT_TYPE".into(), value.into()),
             &CONTENT_LENGTH => ("CONTENT_LENGTH".into(), value.into()),
-            header => (to_cgi_http_header(&header), value.into()),
+            header => (to_cgi_http_header(header), value.into()),
         }
     }));
 
@@ -114,28 +168,5 @@ pub async fn handler(mut request: Request<Body>) -> impl IntoResponse {
         .unwrap()
         .unwrap_or_else(Bytes::new);
 
-    let output = wasm::App::new(wasm).run(&body, &vars).unwrap();
-
-    let mut status = StatusCode::OK;
-    let mut headers = HeaderMap::new();
-
-    if let Some((header, body)) = output.split_once("\n\n") {
-        for line in header.lines() {
-            if let Some((key, value)) = line.split_once(':') {
-                let value = value.trim_start();
-                if key == "Status" {
-                    status = value.parse().unwrap();
-                } else {
-                    headers.insert(
-                        HeaderName::from_str(key).unwrap(),
-                        HeaderValue::from_str(value).unwrap(),
-                    );
-                }
-            }
-        }
-
-        (status, headers, body.to_string())
-    } else {
-        (status, headers, output)
-    }
+    wasm::App::new(wasm).run_cgi(&body, &vars).unwrap()
 }
