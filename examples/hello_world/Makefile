@@ -6,7 +6,7 @@ CFLAGS := -std=c99 -Os -flto \
 	-D_GNU_SOURCE \
 	$(CFLAGS)
 
-OPTFLAGS := -std-link-opts -Os
+OPTFLAGS := -Os
 
 LDFLAGS := -flto
 
