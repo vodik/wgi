@@ -8,6 +8,7 @@ int main() {
 
     const char *greeting = NULL;
 
+    fprintf(stderr, "method: %s\n", method);
     if (strcmp(method, "GET") != 0) {
         printf("Status: 405\n\nMethod Not Allowed\n");
         return 0;
@@ -28,5 +29,6 @@ int main() {
     if (!user_agent) {
         user_agent = "User";
     }
+
     printf("%s %s!\n", greeting, user_agent);
 }

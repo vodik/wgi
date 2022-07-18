@@ -1,6 +1,7 @@
 CC = clang
 LD = llvm-link
 OPT = opt
+XXD = xxd
 
 CFLAGS := -std=c99 -Os -flto \
 	-D_GNU_SOURCE \
@@ -10,7 +11,7 @@ CFLAGS := -std=c99 -Os -flto \
 	-I./quickjs \
 	$(CFLAGS)
 
-OPTFLAGS := -std-link-opts -Os
+OPTFLAGS := -Os
 
 LDFLAGS := -flto
 
@@ -19,16 +20,39 @@ WASI_SYSROOT = /usr/share/wasi-sysroot
 %.bc: %.c
 	$(CC) $(CFLAGS) --target=wasm32-unknown-wasi --sysroot=$(WASI_SYSROOT) -S -emit-llvm $(OUTPUT_OPTION) $<
 
-all: js.wasm
+.PHONY: all
+all: js jsl
 
-all.bc: main.bc quickjs/cutils.bc quickjs/libbf.bc quickjs/libregexp.bc quickjs/libunicode.bc quickjs/quickjs.bc quickjs-wasi.bc
+bootstrap.h: bootstrap.js
+	$(XXD) -i $? $@
+
+quickjs.bc: quickjs/cutils.bc quickjs/libbf.bc quickjs/libregexp.bc quickjs/libunicode.bc quickjs/quickjs.bc
 	$(LD) $^ -o $@
 
-opt.bc: all.bc
+js-all.bc: js.bc quickjs.bc quickjs-wasi.bc
+	$(LD) $^ -o $@
+
+jsl-all.bc: jsl.bc quickjs.bc quickjs-wasi.bc quickjs-lambda.bc
+	$(LD) $^ -o $@
+
+.PHONY: js
+js: js.wasm
+
+js-opt.bc: js-all.bc
 	$(OPT) $(OPTFLAGS) $? -o $@
 
-js.wasm: opt.bc
+js.wasm: js-opt.bc
 	$(CC) $(LDFLAGS) --target=wasm32-unknown-wasi --sysroot=$(WASI_SYSROOT) $? -o $@
 
+.PHONY: jsl
+jsl: jsl.wasm
+
+jsl-opt.bc: jsl-all.bc
+	$(OPT) $(OPTFLAGS) $? -o $@
+
+jsl.wasm: jsl-opt.bc
+	$(CC) $(LDFLAGS) --target=wasm32-unknown-wasi --sysroot=$(WASI_SYSROOT) $? -o $@
+
+.PHONY: clean
 clean:
-	$(RM) js.wasm js.ll *.bc quickjs/*.bc
+	$(RM) js.wasm jsl.wasm *.bc quickjs/*.bc
