@@ -199,6 +199,7 @@ impl App {
         }
 
         let mut wasi_env = builder.finalize()?;
+        let import_object = wasi_env.import_object(&module)?;
 
         {
             let mut state = wasi_env.state();
@@ -206,7 +207,6 @@ impl App {
             wasi_stdin.write_all(input)?;
         }
 
-        let import_object = wasi_env.import_object(&module)?;
         let instance = Instance::new(&module, &import_object)?;
         let run = instance.exports.get_native_function::<(), ()>("_start")?;
         run.call()?;

@@ -26,7 +26,9 @@ export const handler = (event) => {
 </body>
 </html>`
 
+    console.log("Sleeping for 3 seconds...")
     os.sleep(3000)
+
     console.log(body)
     return {
         statusCode: 200,
