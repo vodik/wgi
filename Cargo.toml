@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.56"
-axum = { version = "0.5.1", features = ["headers", "multipart"] }
+axum = { version = "0.5.14", features = ["headers", "multipart"] }
 base64 = "0.13.0"
 hyper = "0.14.18"
 mime = "0.3.16"
